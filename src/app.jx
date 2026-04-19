@@ -1,0 +1,259 @@
+// src/App.jsx
+// Główny komponent — routing między ekranami i krokami
+
+import React, { useState, useCallback, useRef } from 'react';
+
+import { sb, auditLog } from './lib/supabase.js';
+import { initForm, collectPayload } from './lib/formState.js';
+import { exportPDF } from './lib/pdf.js';
+import { useToast } from './hooks/useToast.js';
+import { useAutosave } from './hooks/useAutosave.js';
+
+import { ProgressBar } from './components/ProgressBar.jsx';
+import { Step1Dane } from './components/steps/Step1Dane.jsx';
+import { Step2OsobaFizyczna } from './components/steps/Step2OsobaFizyczna.jsx';
+import { Step3Firma } from './components/steps/Step3Firma.jsx';
+import { Step4Koszyki } from './components/steps/Step4Koszyki.jsx';
+import { Step5Historia } from './components/steps/Step5Historia.jsx';
+import { Step6Podsumowanie } from './components/steps/Step6Podsumowanie.jsx';
+
+// ── Screens ────────────────────────────────────────────────────────────────
+function Landing({ onStart, onDashboard }) {
+  return (
+    <div className="wrap">
+      <div className="card" style={{ textAlign: 'center', padding: '40px 28px 30px' }}>
+        <div style={{ fontSize: 40, marginBottom: 14 }}>📋</div>
+        <h1 className="card-title" style={{ fontSize: 22, marginBottom: 8 }}>
+          Analiza Potrzeb Klienta
+        </h1>
+        <p className="card-sub" style={{ maxWidth: 440, margin: '0 auto' }}>
+          Formularz APK · Aura Consulting · KNF art. 8 UDU ·{' '}
+          <span style={{ fontFamily: 'monospace', fontSize: 11 }}>
+            projekt aurabroker (Supabase)
+          </span>
+        </p>
+      </div>
+
+      <div className="mode-grid">
+        <div className="mode-card" onClick={() => onStart('client')}>
+          <div className="icon">👤</div>
+          <h3>Wypełniam jako klient</h3>
+          <p>Zaznaczam swoje potrzeby ubezpieczeniowe. Formularz trafia do doradcy Aura Consulting.</p>
+        </div>
+        <div className="mode-card" onClick={() => onStart('advisor')}>
+          <div className="icon">🧑‍💼</div>
+          <h3>Tryb doradcy</h3>
+          <p>Wypełniam APK z klientem, generuję link kliencki lub przeglądam archiwum.</p>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 9, marginTop: 12, justifyContent: 'center' }}>
+        <button className="btn btn-sec" style={{ fontSize: 12 }} onClick={onDashboard}>
+          📂 Panel doradcy — archiwum APK
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({ onNewApk, onBack }) {
+  const [list, setList] = React.useState([]);
+  const toast = useToast();
+
+  React.useEffect(() => {
+    sb('GET', 'apk_forms?select=*&order=created_at.desc&limit=60').then((r) => {
+      if (r.data) setList(r.data);
+      else toast('Błąd ładowania: ' + r.error, 'err');
+    });
+  }, []);
+
+  return (
+    <div className="wrap">
+      <div className="card">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+          <div>
+            <div className="card-title">Panel doradcy — archiwum APK</div>
+            <div className="card-sub" style={{ marginBottom: 0 }}>
+              Projekt: aurabroker · Supabase eu-west-1
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-pri" style={{ fontSize: 12 }} onClick={onNewApk}>
+              + Nowy APK
+            </button>
+            <button className="btn btn-sec" style={{ fontSize: 12 }} onClick={onBack}>
+              ← Wróć
+            </button>
+          </div>
+        </div>
+
+        {list.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--tx3)', fontSize: 13 }}>
+            Brak zapisanych formularzy APK. Pojawią się tu po pierwszym zapisie.
+          </div>
+        ) : (
+          list.map((item, i) => (
+            <div key={i} className="apk-item">
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{item.client_name}</div>
+                <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 2, fontFamily: 'monospace' }}>
+                  {item.ref_number} · {item.form_date} · {item.advisor_name || '—'}
+                </div>
+              </div>
+              <span className={`apk-status ${item.status === 'submitted' ? 'st-sub' : 'st-draft'}`}>
+                {item.status === 'submitted' ? 'złożony' : 'szkic'}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Success({ form, onNewForm, onDashboard, onHome, onPDF }) {
+  return (
+    <div className="wrap">
+      <div className="card">
+        <div className="success-wrap">
+          <div className="icon">✅</div>
+          <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>
+            Formularz APK zapisany w Supabase
+          </h2>
+          <p style={{ fontSize: 13, color: 'var(--tx3)', maxWidth: 440, margin: '0 auto', lineHeight: 1.6 }}>
+            Analiza potrzeb klienta została zarchiwizowana. Doradca Aura Consulting skontaktuje
+            się z Tobą w sprawie oferty.
+          </p>
+          <div style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--tx3)', marginTop: 10 }}>
+            {form.ref} · {form.date} · {form.client}
+          </div>
+          <div className="success-btns">
+            <button className="btn btn-pdf" onClick={onPDF}>📄 Pobierz PDF</button>
+            <button className="btn btn-pri" onClick={onNewForm}>+ Nowa analiza</button>
+            <button className="btn btn-sec" onClick={onDashboard}>📂 Panel doradcy</button>
+            <button className="btn btn-sec" onClick={onHome}>← Strona główna</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main App ────────────────────────────────────────────────────────────────
+export function App() {
+  const [screen, setScreen] = useState('landing');
+  const [step, setStep]     = useState(1);
+  const [mode, setMode]     = useState('client');
+  const [form, setForm]     = useState(initForm);
+  const [formId, setFormId] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const toast = useToast();
+
+  // autosave
+  const getPayload = useCallback(
+    () => collectPayload(form, mode, 'draft').payload,
+    [form, mode]
+  );
+
+  const { schedule: scheduleAutosave } = useAutosave({
+    getPayload,
+    formId,
+    onFormId: setFormId,
+    toast,
+    actor: form.advisor || mode,
+  });
+
+  const goScreen = (s) => { setScreen(s); window.scrollTo(0, 0); };
+  const goStep   = (n) => { setStep(n);   window.scrollTo(0, 0); scheduleAutosave(); };
+
+  const startForm = (m) => {
+    setMode(m);
+    setForm(initForm());
+    setFormId(null);
+    setScreen('form');
+    setStep(1);
+  };
+
+  const submitForm = async () => {
+    if (!form.client.trim()) { toast('Podaj imię/nazwę klienta (krok 1)', 'err'); return; }
+    setSaving(true);
+
+    const { payload } = collectPayload(form, mode, 'submitted');
+    let r;
+    let fid = formId;
+
+    if (fid) {
+      r = await sb('PATCH', `apk_forms?id=eq.${fid}`, payload);
+    } else {
+      r = await sb('POST', 'apk_forms', payload);
+    }
+
+    if (r.error) {
+      toast('Błąd zapisu: ' + r.error, 'err', 4000);
+      setSaving(false);
+      return;
+    }
+
+    if (r.data && r.data[0]) fid = r.data[0].id;
+    if (fid) await auditLog(fid, 'submitted', form.advisor || mode);
+
+    setSaving(false);
+    goScreen('success');
+  };
+
+  const doPDF = () => {
+    const { formData } = collectPayload(form, mode, 'submitted');
+    exportPDF(formData);
+    if (formId) auditLog(formId, 'pdf_exported', form.advisor || mode);
+  };
+
+  // ── Header ─────────────────────────────────────────────────────────────
+  const headerMeta =
+    screen === 'form'
+      ? `Krok ${step}/6 · ${mode === 'client' ? 'klient' : 'doradca'}`
+      : screen === 'dashboard'
+      ? 'Panel doradcy'
+      : 'Analiza Potrzeb Klienta · KNF art. 8';
+
+  return (
+    <>
+      <header className="hdr">
+        <div className="hdr-logo">AURA <span>/</span> APK</div>
+        <div className="hdr-meta">{headerMeta}</div>
+      </header>
+
+      {/* ── Screens ── */}
+      {screen === 'landing' && (
+        <Landing onStart={startForm} onDashboard={() => goScreen('dashboard')} />
+      )}
+
+      {screen === 'form' && (
+        <div className="wrap">
+          <ProgressBar step={step} />
+
+          {step === 1 && <Step1Dane      form={form} setForm={setForm} mode={mode} onBack={() => goScreen('landing')} onNext={() => goStep(2)} toast={toast} />}
+          {step === 2 && <Step2OsobaFizyczna form={form} setForm={setForm} onBack={() => goStep(1)} onNext={() => goStep(3)} />}
+          {step === 3 && <Step3Firma     form={form} setForm={setForm} onBack={() => goStep(2)} onNext={() => goStep(4)} />}
+          {step === 4 && <Step4Koszyki   form={form} setForm={setForm} onBack={() => goStep(3)} onNext={() => goStep(5)} />}
+          {step === 5 && <Step5Historia  form={form} setForm={setForm} onBack={() => goStep(4)} onNext={() => goStep(6)} />}
+          {step === 6 && <Step6Podsumowanie form={form} setForm={setForm} onBack={() => goStep(5)} onSave={submitForm} onPDF={doPDF} saving={saving} />}
+        </div>
+      )}
+
+      {screen === 'dashboard' && (
+        <Dashboard onNewApk={() => startForm('advisor')} onBack={() => goScreen('landing')} />
+      )}
+
+      {screen === 'success' && (
+        <Success
+          form={form}
+          onNewForm={() => startForm('client')}
+          onDashboard={() => goScreen('dashboard')}
+          onHome={() => goScreen('landing')}
+          onPDF={doPDF}
+        />
+      )}
+    </>
+  );
+}
