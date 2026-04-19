@@ -4,9 +4,8 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  // Ustaw base na nazwę repo jeśli hostujesz na GitHub Pages
-  // np. base: '/apk/' dla https://aurabroker.github.io/apk/
-  base: '/',
+  // GitHub Pages: https://aurabroker.github.io/APK/
+  base: '/APK/',
   build: {
     outDir:    'dist',
     sourcemap: false,
